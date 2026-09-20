@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>影片播放器（可旋轉）</title>
+<style>
+:root{--bg:#f5f6f8;--panel:#fff;--text:#1a1a1a;--muted:#666;--accent:#3366ff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1115;--panel:#1a1d24;--text:#eee;--muted:#9aa0aa;--accent:#5b8cff}}
+:root[data-theme="dark"]{--bg:#0f1115;--panel:#1a1d24;--text:#eee;--muted:#9aa0aa;--accent:#5b8cff}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC",sans-serif;display:flex;flex-direction:column;overflow:hidden}
+header,#bar{position:fixed;left:0;right:0;z-index:20;background:var(--panel);transition:transform .3s,opacity .3s}
+header{top:0;display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:calc(10px + env(safe-area-inset-top,0px)) 16px 10px;border-bottom:1px solid rgba(128,128,128,.2)}
+header h1{font-size:15px;margin:0;font-weight:600;white-space:nowrap}
+.sp{flex:1}
+.btn,button{background:var(--accent);color:#fff;border:0;padding:8px 14px;border-radius:8px;font-size:13px;cursor:pointer;white-space:nowrap}
+button:disabled{opacity:.4;cursor:default}
+.sec{background:transparent;color:var(--text);border:1px solid rgba(128,128,128,.4)}
+input[type=file]{display:none}
+#status{color:var(--muted);font-size:12px}
+main{flex:1;min-height:0;position:relative;overflow:hidden;background:#000;touch-action:none}
+#v{position:absolute;left:50%;top:50%;max-width:none;display:none;background:#000;user-select:none}
+main.can-pan #v{cursor:grab}
+main.panning #v{cursor:grabbing}
+#empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#aaa;line-height:1.9;padding:20px}
+#empty b{color:#eee}
+.tools{position:absolute;top:calc(74px + env(safe-area-inset-top,0px));right:10px;display:flex;gap:6px;z-index:2;transition:opacity .3s}
+.tools button{background:rgba(0,0,0,.5);width:34px;height:34px;border-radius:50%;font-size:16px;padding:0}
+.tools button:hover{background:rgba(0,0,0,.7)}
+.tools i{width:1px;background:rgba(255,255,255,.3);margin:4px 2px}
+#bar{bottom:0;border-top:1px solid rgba(128,128,128,.2);padding:8px 16px calc(8px + env(safe-area-inset-bottom,0px));font-size:12px;color:var(--muted)}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.row+.row{margin-top:6px}
+#seek{flex:1;min-width:120px;accent-color:var(--accent)}
+#vol{width:80px;accent-color:var(--accent)}
+.ic{padding:6px 11px;font-size:15px}
+select{background:transparent;color:var(--text);border:1px solid rgba(128,128,128,.4);border-radius:8px;padding:6px;font-size:12px}
+#fname{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:60px}
+#list{position:absolute;top:0;right:0;bottom:0;width:min(300px,80%);background:var(--panel);z-index:15;overflow:auto;padding:110px 0 90px;transform:translateX(100%);transition:transform .25s;border-left:1px solid rgba(128,128,128,.2)}
+#list.open{transform:none}
+#list div{padding:9px 16px;font-size:13px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#list div:hover{background:rgba(128,128,128,.15)}
+#list div.on{color:var(--accent);font-weight:600}
+body.hid header{transform:translateY(-100%);opacity:0;pointer-events:none}
+body.hid #bar{transform:translateY(100%);opacity:0;pointer-events:none}
+body.hid .tools{opacity:0;pointer-events:none}
+body.hid main{cursor:none}
+@media (max-width:600px){#vol{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>🎬 影片播放器</h1>
+  <label class="btn" for="folderIn">選擇資料夾</label>
+  <input id="folderIn" type="file" webkitdirectory directory multiple>
+  <label class="btn sec" for="fileIn">或選多個影片</label>
+  <input id="fileIn" type="file" multiple accept="video/*,.mkv,.mov,.m4v">
+  <label class="btn sec" for="moreIn">+ 加入更多</label>
+  <input id="moreIn" type="file" multiple accept="video/*,.mkv,.mov,.m4v">
+  <span class="sp"></span>
+  <span id="status">尚未載入影片</span>
+</header>
+
+<main id="stage">
+  <div id="empty"><div>
+    👆 點上方「選擇資料夾」載入整個資料夾的影片<br>
+    <b>支援 MP4、WEBM、MOV、M4V 等瀏覽器可播放的格式</b><br>
+    空白鍵 播放／暫停　← → 快退／快進 5 秒　↑ ↓ 音量<br>
+    R 逆時針旋轉　Shift+R 順時針旋轉　N／P 下一部／上一部<br>
+    + − 0 縮放　[ ] 調整速度　M 靜音　F 全螢幕　L 播放清單
+  </div></div>
+  <video id="v" playsinline></video>
+  <div id="list"></div>
+  <div class="tools">
+    <button id="rotL" title="逆時針旋轉 (R)">⟲</button>
+    <button id="rotR" title="順時針旋轉 (Shift+R)">⟳</button>
+    <i></i>
+    <button id="zOut" title="縮小 (-)">−</button>
+    <button id="zIn" title="放大 (+)">+</button>
+    <button id="zReset" title="重設縮放 (0)">⤢</button>
+    <i></i>
+    <button id="fsBtn" title="全螢幕 (F)">⛶</button>
+  </div>
+</main>
+
+<div id="bar">
+  <div class="row">
+    <span id="cur">0:00</span>
+    <input id="seek" type="range" min="0" max="1000" value="0">
+    <span id="dur">0:00</span>
+  </div>
+  <div class="row">
+    <button class="sec ic" id="prevBtn" disabled title="上一部 (P)">⏮</button>
+    <button class="ic" id="playBtn" disabled title="播放／暫停 (空白鍵)">▶</button>
+    <button class="sec ic" id="nextBtn" disabled title="下一部 (N)">⏭</button>
+    <button class="sec ic" id="muteBtn" title="靜音 (M)">🔊</button>
+    <input id="vol" type="range" min="0" max="1" step="0.05" value="1">
+    <select id="rate" title="播放速度">
+      <option value="0.5">0.5×</option><option value="0.75">0.75×</option>
+      <option value="1" selected>1×</option><option value="1.25">1.25×</option>
+      <option value="1.5">1.5×</option><option value="2">2×</option>
+    </select>
+    <span id="fname"></span>
+    <span id="counter"></span>
+    <button class="sec ic" id="listBtn" title="播放清單 (L)">☰</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const v = $('v'), stage = $('stage'), L = $('list');
+  let files = [], urls = [], rots = [], idx = -1, scale = 1, tx = 0, ty = 0, rate = 1;
+  const VID = /\.(mp4|m4v|webm|mkv|mov|ogv|ogg|avi|3gp|ts)$/i;
+  const isVideo = f => VID.test(f.name) || (f.type || '').startsWith('video/');
+  const nsort = (a, b) => a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'});
+  const status = t => $('status').textContent = t;
+  const fmt = s => { if(!isFinite(s)) return '0:00'; s = Math.floor(s); const h = Math.floor(s/3600), m = Math.floor(s%3600/60), x = s%60;
+    return (h ? h + ':' + String(m).padStart(2,'0') : m) + ':' + String(x).padStart(2,'0'); };
+
+  // ---- 載入檔案 ----
+  function addFiles(list, replace){
+    const inc = list.filter(isVideo);
+    if(!inc.length){ status('找不到影片檔案'); return; }
+    const cur = (!replace && idx >= 0) ? files[idx] : null;
+    let items = [];
+    if(replace){ urls.forEach(u => URL.revokeObjectURL(u)); idx = -1; }
+    else items = files.map((f,i) => ({f, u:urls[i], r:rots[i]}));
+    const have = new Set(items.map(o => o.f.name + o.f.size));
+    let n = 0;
+    inc.forEach(f => { const k = f.name + f.size; if(have.has(k)) return; have.add(k); n++;
+      items.push({f, u:URL.createObjectURL(f), r:0}); });
+    if(!n){ status('這些檔案已經在清單中了'); return; }
+    items.sort((a,b) => nsort(a.f, b.f));
+    files = items.map(o => o.f); urls = items.map(o => o.u); rots = items.map(o => o.r);
+    buildList();
+    if(cur){ idx = files.indexOf(cur); mark(); } else openAt(0);
+    status(`已載入 ${files.length} 部影片` + (cur ? `（新增 ${n} 部）` : ''));
+  }
+  function buildList(){
+    L.innerHTML = '';
+    files.forEach((f,i) => { const d = document.createElement('div');
+      d.textContent = f.name; d.title = f.name; d.onclick = () => openAt(i); L.appendChild(d); });
+  }
+  function mark(){
+    [...L.children].forEach((el,i) => { el.classList.toggle('on', i === idx);
+      if(i === idx) el.scrollIntoView({block:'nearest'}); });
+    $('fname').textContent = files[idx] ? files[idx].name : '';
+    $('counter').textContent = idx >= 0 ? `${idx+1} / ${files.length}` : '';
+    $('prevBtn').disabled = idx <= 0;
+    $('nextBtn').disabled = idx < 0 || idx >= files.length - 1;
+    $('playBtn').disabled = idx < 0;
+  }
+  function openAt(i){
+    if(i < 0 || i >= files.length) return;
+    idx = i; scale = 1; tx = ty = 0;
+    $('empty').style.display = 'none'; v.style.display = 'block';
+    v.src = urls[i]; v.defaultPlaybackRate = rate; v.playbackRate = rate;
+    v.play().catch(() => {});
+    mark();
+  }
+
+  // ---- 旋轉／縮放：依旋轉後的外框重新計算尺寸，讓影片始終完整置入畫面 ----
+  function fit(){
+    if(idx < 0 || !v.videoWidth) return;
+    const d = rots[idx], r = d % 180 !== 0;
+    const ew = r ? v.videoHeight : v.videoWidth, eh = r ? v.videoWidth : v.videoHeight;
+    const k = Math.min(stage.clientWidth / ew, stage.clientHeight / eh);
+    v.style.width = v.videoWidth * k + 'px';
+    v.style.height = v.videoHeight * k + 'px';
+    v.style.transform = `translate(-50%,-50%) translate(${tx}px,${ty}px) rotate(${d}deg) scale(${scale})`;
+    stage.classList.toggle('can-pan', scale > 1);
+  }
+  function rotate(d){ if(idx < 0) return; rots[idx] = (rots[idx] + d + 360) % 360; fit(); }
+  function setZoom(s){ scale = Math.min(4, Math.max(1, s)); if(scale === 1){ tx = ty = 0; } fit(); }
+  window.addEventListener('resize', fit);
+  v.addEventListener('loadedmetadata', () => { fit(); $('dur').textContent = fmt(v.duration); });
+  $('rotL').onclick = () => rotate(-90);
+  $('rotR').onclick = () => rotate(90);
+  $('zIn').onclick = () => setZoom(scale + .25);
+  $('zOut').onclick = () => setZoom(scale - .25);
+  $('zReset').onclick = () => setZoom(1);
+  v.addEventListener('dblclick', () => setZoom(scale > 1 ? 1 : 2));
+  stage.addEventListener('wheel', e => { if(e.ctrlKey || e.metaKey){ e.preventDefault(); setZoom(scale + (e.deltaY < 0 ? .1 : -.1)); } }, {passive:false});
+
+  // 放大後拖曳平移；雙指縮放
+  let drag = null, moved = false, pd = 0, ps = 1;
+  stage.addEventListener('pointerdown', e => {
+    moved = false;
+    if(scale > 1 && e.button === 0 && e.isPrimary){
+      drag = {x:e.clientX, y:e.clientY, tx, ty};
+      stage.setPointerCapture(e.pointerId); stage.classList.add('panning');
+    }
+  });
+  stage.addEventListener('pointermove', e => {
+    if(!drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if(Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    tx = drag.tx + dx; ty = drag.ty + dy; fit();
+  });
+  const endDrag = () => { drag = null; stage.classList.remove('panning'); };
+  stage.addEventListener('pointerup', endDrag);
+  stage.addEventListener('pointercancel', endDrag);
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  stage.addEventListener('touchstart', e => { if(e.touches.length === 2){ pd = dist(e.touches); ps = scale; drag = null; moved = true; } }, {passive:true});
+  stage.addEventListener('touchmove', e => { if(e.touches.length === 2 && pd) setZoom(ps * dist(e.touches) / pd); }, {passive:true});
+  stage.addEventListener('touchend', e => { if(e.touches.length < 2) pd = 0; });
+
+  // ---- 播放控制 ----
+  const togglePlay = () => { if(idx < 0) return; v.paused ? v.play().catch(() => {}) : v.pause(); };
+  v.addEventListener('click', () => { if(moved){ moved = false; return; } togglePlay(); });
+  $('playBtn').onclick = togglePlay;
+  v.addEventListener('play', () => { $('playBtn').textContent = '⏸'; sched(); });
+  v.addEventListener('pause', () => { $('playBtn').textContent = '▶'; reveal(); });
+  v.addEventListener('ended', () => { if(idx < files.length - 1) openAt(idx + 1); });
+  v.addEventListener('error', () => { status('無法播放此檔案（瀏覽器可能不支援其編碼，例如部分 MKV／AVI）'); reveal(); });
+  $('prevBtn').onclick = () => openAt(idx - 1);
+  $('nextBtn').onclick = () => openAt(idx + 1);
+  const seek = $('seek'); let seeking = false;
+  v.addEventListener('timeupdate', () => {
+    $('cur').textContent = fmt(v.currentTime);
+    if(!seeking && v.duration) seek.value = v.currentTime / v.duration * 1000;
+  });
+  seek.addEventListener('pointerdown', () => seeking = true);
+  seek.addEventListener('input', () => { if(v.duration){ v.currentTime = seek.value / 1000 * v.duration; $('cur').textContent = fmt(v.currentTime); } });
+  seek.addEventListener('change', () => { seeking = false; });
+  const skip = s => { if(v.duration) v.currentTime = Math.min(v.duration, Math.max(0, v.currentTime + s)); };
+  const syncVol = () => { $('muteBtn').textContent = (v.muted || v.volume === 0) ? '🔇' : '🔊'; $('vol').value = v.muted ? 0 : v.volume; };
+  v.addEventListener('volumechange', syncVol);
+  $('vol').addEventListener('input', e => { v.muted = false; v.volume = +e.target.value; });
+  $('muteBtn').onclick = () => { v.muted = !v.muted; };
+  const setRate = r => { rate = r; v.defaultPlaybackRate = r; v.playbackRate = r; $('rate').value = String(r); };
+  $('rate').addEventListener('change', e => setRate(+e.target.value));
+  $('listBtn').onclick = () => L.classList.toggle('open');
+
+  // 全螢幕
+  function toggleFS(){
+    const de = document.documentElement;
+    if(!document.fullscreenElement) (de.requestFullscreen || de.webkitRequestFullscreen || (() => {})).call(de);
+    else (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  }
+  $('fsBtn').onclick = toggleFS;
+  document.addEventListener('fullscreenchange', () => setTimeout(fit, 100));
+
+  // 播放時無動作 3 秒後自動隱藏工具列；暫停或尚未載入時常駐
+  let ht;
+  function sched(){ clearTimeout(ht); if(idx < 0 || v.paused) return; ht = setTimeout(() => document.body.classList.add('hid'), 3000); }
+  function reveal(){ document.body.classList.remove('hid'); sched(); }
+  ['mousemove','touchstart','keydown','click'].forEach(t => document.addEventListener(t, reveal, {passive:true}));
+
+  // 點選後讓按鈕／滑桿放開焦點，避免空白鍵與方向鍵被它們吃掉
+  document.addEventListener('click', e => { const b = e.target.closest('button'); if(b) b.blur(); });
+  ['seek','vol','rate'].forEach(id => $(id).addEventListener('change', e => e.target.blur()));
+
+  document.addEventListener('keydown', e => {
+    if(e.ctrlKey || e.metaKey || e.altKey) return;
+    const k = e.key;
+    if(k === ' ' || k === 'k'){ e.preventDefault(); togglePlay(); }
+    else if(k === 'ArrowRight'){ e.preventDefault(); skip(e.shiftKey ? 30 : 5); }
+    else if(k === 'ArrowLeft'){ e.preventDefault(); skip(e.shiftKey ? -30 : -5); }
+    else if(k === 'ArrowUp'){ e.preventDefault(); v.muted = false; v.volume = Math.min(1, v.volume + .05); }
+    else if(k === 'ArrowDown'){ e.preventDefault(); v.volume = Math.max(0, v.volume - .05); }
+    else if(k === 'n' || k === 'N' || k === 'PageDown') openAt(idx + 1);
+    else if(k === 'p' || k === 'P' || k === 'PageUp') openAt(idx - 1);
+    else if(k === 'r' || k === 'R') rotate(e.shiftKey ? 90 : -90);
+    else if(k === '+' || k === '=') setZoom(scale + .25);
+    else if(k === '-' || k === '_') setZoom(scale - .25);
+    else if(k === '0') setZoom(1);
+    else if(k === 'm' || k === 'M') v.muted = !v.muted;
+    else if(k === 'f' || k === 'F') toggleFS();
+    else if(k === 'l' || k === 'L') L.classList.toggle('open');
+    else if(k === '[') setRate(Math.max(.25, rate - .25));
+    else if(k === ']') setRate(Math.min(4, rate + .25));
+  });
+
+  const pick = (id, replace) => $(id).addEventListener('change', e => {
+    addFiles(Array.from(e.target.files), replace); e.target.value = '';
+  });
+  pick('folderIn', true); pick('fileIn', true); pick('moreIn', false);
+})();
+</script>
+</body>
+</html>
