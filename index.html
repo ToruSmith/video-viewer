@@ -22,8 +22,7 @@ button:disabled{opacity:.4;cursor:default}
 input[type=file]{display:none}
 #status{color:var(--muted);font-size:12px}
 main{flex:1;min-height:0;position:relative;overflow:hidden;background:#000;touch-action:none}
-#v{position:absolute;left:50%;top:50%;max-width:none;display:none;background:#000;user-select:none}
-main.can-pan #v{cursor:grab}
+#v{position:absolute;left:50%;top:50%;max-width:none;display:none;background:#000;user-select:none;cursor:grab}
 main.panning #v{cursor:grabbing}
 #empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:#aaa;line-height:1.9;padding:20px}
 #empty b{color:#eee}
@@ -39,13 +38,14 @@ main.panning #v{cursor:grabbing}
 .ic{padding:6px 11px;font-size:15px}
 select{background:transparent;color:var(--text);border:1px solid rgba(128,128,128,.4);border-radius:8px;padding:6px;font-size:12px}
 #fname{flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:60px}
-#list{position:absolute;top:0;right:0;bottom:0;width:min(300px,80%);background:var(--panel);z-index:15;overflow:auto;padding:110px 0 90px;transform:translateX(100%);transition:transform .25s;border-left:1px solid rgba(128,128,128,.2)}
-#list.open{transform:none}
+#list{position:fixed;top:0;right:0;bottom:0;width:min(300px,80%);background:color-mix(in srgb,var(--panel) 85%,transparent);backdrop-filter:blur(8px);z-index:15;overflow:auto;padding:110px 0 90px;transform:translateX(100%);visibility:hidden;transition:transform .25s,visibility 0s .25s;border-left:1px solid rgba(128,128,128,.2)}
+#list.open{transform:none;visibility:visible;transition:transform .25s}
 #list div{padding:9px 16px;font-size:13px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #list div:hover{background:rgba(128,128,128,.15)}
 #list div.on{color:var(--accent);font-weight:600}
 body.hid header{transform:translateY(-100%);opacity:0;pointer-events:none}
 body.hid #bar{transform:translateY(100%);opacity:0;pointer-events:none}
+body.hid #list{transform:translateX(100%)}
 body.hid .tools{opacity:0;pointer-events:none}
 body.hid main{cursor:none}
 @media (max-width:600px){#vol{display:none}}
@@ -70,21 +70,23 @@ body.hid main{cursor:none}
     <b>支援 MP4、WEBM、MOV、M4V 等瀏覽器可播放的格式</b><br>
     空白鍵 播放／暫停　← → 快退／快進 5 秒　↑ ↓ 音量<br>
     R 逆時針旋轉　Shift+R 順時針旋轉　N／P 下一部／上一部<br>
-    + − 0 縮放　[ ] 調整速度　M 靜音　F 全螢幕　L 播放清單
+    滾輪／+ −　縮放　拖曳畫面　調整位置　0　重設　[ ]　速度　O　播放模式<br>
+    M 靜音　F 全螢幕　L 播放清單
   </div></div>
   <video id="v" playsinline></video>
-  <div id="list"></div>
   <div class="tools">
     <button id="rotL" title="逆時針旋轉 (R)">⟲</button>
     <button id="rotR" title="順時針旋轉 (Shift+R)">⟳</button>
     <i></i>
     <button id="zOut" title="縮小 (-)">−</button>
     <button id="zIn" title="放大 (+)">+</button>
-    <button id="zReset" title="重設縮放 (0)">⤢</button>
+    <button id="zReset" title="重設縮放與位置 (0)">⤢</button>
     <i></i>
     <button id="fsBtn" title="全螢幕 (F)">⛶</button>
   </div>
 </main>
+
+<div id="list"></div>
 
 <div id="bar">
   <div class="row">
@@ -103,6 +105,7 @@ body.hid main{cursor:none}
       <option value="1" selected>1×</option><option value="1.25">1.25×</option>
       <option value="1.5">1.5×</option><option value="2">2×</option>
     </select>
+    <button class="sec" id="modeBtn" title="播放模式 (O)"></button>
     <span id="fname"></span>
     <span id="counter"></span>
     <button class="sec ic" id="listBtn" title="播放清單 (L)">☰</button>
@@ -113,7 +116,7 @@ body.hid main{cursor:none}
 (function(){
   const $ = id => document.getElementById(id);
   const v = $('v'), stage = $('stage'), L = $('list');
-  let files = [], urls = [], rots = [], idx = -1, scale = 1, tx = 0, ty = 0, rate = 1;
+  let files = [], urls = [], rots = [], idx = -1, scale = 1, tx = 0, ty = 0, rate = 1, mode = 0, lt;
   const VID = /\.(mp4|m4v|webm|mkv|mov|ogv|ogg|avi|3gp|ts)$/i;
   const isVideo = f => VID.test(f.name) || (f.type || '').startsWith('video/');
   const nsort = (a, b) => a.name.localeCompare(b.name, undefined, {numeric:true, sensitivity:'base'});
@@ -143,15 +146,15 @@ body.hid main{cursor:none}
   function buildList(){
     L.innerHTML = '';
     files.forEach((f,i) => { const d = document.createElement('div');
-      d.textContent = f.name; d.title = f.name; d.onclick = () => openAt(i); L.appendChild(d); });
+      d.textContent = f.name; d.title = f.name; d.onclick = () => { openAt(i); L.classList.remove('open'); }; L.appendChild(d); });
   }
   function mark(){
     [...L.children].forEach((el,i) => { el.classList.toggle('on', i === idx);
       if(i === idx) el.scrollIntoView({block:'nearest'}); });
     $('fname').textContent = files[idx] ? files[idx].name : '';
     $('counter').textContent = idx >= 0 ? `${idx+1} / ${files.length}` : '';
-    $('prevBtn').disabled = idx <= 0;
-    $('nextBtn').disabled = idx < 0 || idx >= files.length - 1;
+    $('prevBtn').disabled = idx < 0 || prevIdx() < 0;
+    $('nextBtn').disabled = idx < 0 || nextIdx() < 0;
     $('playBtn').disabled = idx < 0;
   }
   function openAt(i){
@@ -172,53 +175,76 @@ body.hid main{cursor:none}
     v.style.width = v.videoWidth * k + 'px';
     v.style.height = v.videoHeight * k + 'px';
     v.style.transform = `translate(-50%,-50%) translate(${tx}px,${ty}px) rotate(${d}deg) scale(${scale})`;
-    stage.classList.toggle('can-pan', scale > 1);
   }
   function rotate(d){ if(idx < 0) return; rots[idx] = (rots[idx] + d + 360) % 360; fit(); }
-  function setZoom(s){ scale = Math.min(4, Math.max(1, s)); if(scale === 1){ tx = ty = 0; } fit(); }
+  // 以指定螢幕座標為中心縮放（px, py 為相對畫面中心的位移）
+  function setZoom(s, px = 0, py = 0){
+    s = Math.min(8, Math.max(1, s)); if(s < 1.02) s = 1;
+    const k = s / scale;
+    if(s === 1 && scale > 1){ tx = ty = 0; } else { tx = px - (px - tx) * k; ty = py - (py - ty) * k; }
+    scale = s; fit();
+  }
+  function zoomAt(s, cx, cy){ const R = stage.getBoundingClientRect(); setZoom(s, cx - R.left - R.width / 2, cy - R.top - R.height / 2); }
+  function resetView(){ scale = 1; tx = ty = 0; fit(); }
   window.addEventListener('resize', fit);
   v.addEventListener('loadedmetadata', () => { fit(); $('dur').textContent = fmt(v.duration); });
   $('rotL').onclick = () => rotate(-90);
   $('rotR').onclick = () => rotate(90);
-  $('zIn').onclick = () => setZoom(scale + .25);
-  $('zOut').onclick = () => setZoom(scale - .25);
-  $('zReset').onclick = () => setZoom(1);
-  v.addEventListener('dblclick', () => setZoom(scale > 1 ? 1 : 2));
-  stage.addEventListener('wheel', e => { if(e.ctrlKey || e.metaKey){ e.preventDefault(); setZoom(scale + (e.deltaY < 0 ? .1 : -.1)); } }, {passive:false});
+  $('zIn').onclick = () => setZoom(scale * 1.25);
+  $('zOut').onclick = () => setZoom(scale / 1.25);
+  $('zReset').onclick = resetView;
+  v.addEventListener('dblclick', () => { if(scale > 1 || tx || ty) resetView(); else setZoom(2); });
+  stage.addEventListener('wheel', e => { e.preventDefault(); zoomAt(scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1), e.clientX, e.clientY); }, {passive:false});
 
-  // 放大後拖曳平移；雙指縮放
+  // 拖曳畫面調整位置（任何縮放倍率都可拖曳）；雙指縮放
   let drag = null, moved = false, pd = 0, ps = 1;
   stage.addEventListener('pointerdown', e => {
     moved = false;
-    if(scale > 1 && e.button === 0 && e.isPrimary){
-      drag = {x:e.clientX, y:e.clientY, tx, ty};
-      stage.setPointerCapture(e.pointerId); stage.classList.add('panning');
-    }
+    if(e.target === v && e.button === 0 && e.isPrimary) drag = {x:e.clientX, y:e.clientY, tx, ty};
   });
-  stage.addEventListener('pointermove', e => {
+  window.addEventListener('pointermove', e => {
     if(!drag) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-    if(Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+    if(!moved){ if(Math.abs(dx) + Math.abs(dy) <= 4) return; moved = true; stage.classList.add('panning'); }
     tx = drag.tx + dx; ty = drag.ty + dy; fit();
   });
   const endDrag = () => { drag = null; stage.classList.remove('panning'); };
-  stage.addEventListener('pointerup', endDrag);
-  stage.addEventListener('pointercancel', endDrag);
+  window.addEventListener('pointerup', endDrag);
+  window.addEventListener('pointercancel', endDrag);
   const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
   stage.addEventListener('touchstart', e => { if(e.touches.length === 2){ pd = dist(e.touches); ps = scale; drag = null; moved = true; } }, {passive:true});
-  stage.addEventListener('touchmove', e => { if(e.touches.length === 2 && pd) setZoom(ps * dist(e.touches) / pd); }, {passive:true});
+  stage.addEventListener('touchmove', e => { if(e.touches.length === 2 && pd){ const t = e.touches;
+    zoomAt(ps * dist(t) / pd, (t[0].clientX + t[1].clientX) / 2, (t[0].clientY + t[1].clientY) / 2); } }, {passive:true});
   stage.addEventListener('touchend', e => { if(e.touches.length < 2) pd = 0; });
 
   // ---- 播放控制 ----
   const togglePlay = () => { if(idx < 0) return; v.paused ? v.play().catch(() => {}) : v.pause(); };
-  v.addEventListener('click', () => { if(moved){ moved = false; return; } togglePlay(); });
+  v.addEventListener('click', () => { if(moved){ moved = false; return; } if(L.classList.contains('open')){ L.classList.remove('open'); return; } togglePlay(); });
   $('playBtn').onclick = togglePlay;
   v.addEventListener('play', () => { $('playBtn').textContent = '⏸'; sched(); });
   v.addEventListener('pause', () => { $('playBtn').textContent = '▶'; reveal(); });
-  v.addEventListener('ended', () => { if(idx < files.length - 1) openAt(idx + 1); });
+  // 播放模式：順序播放／全部循環／單部循環／隨機
+  const MODES = [['➡','順序播放'], ['🔁','全部循環'], ['🔂','單部循環'], ['🔀','隨機播放']];
+  function nextIdx(){
+    const n = files.length; if(idx < 0) return -1;
+    if(mode === 3 && n > 1){ let j; do { j = Math.floor(Math.random() * n); } while(j === idx); return j; }
+    if(idx < n - 1) return idx + 1;
+    return mode === 1 ? 0 : -1;
+  }
+  function prevIdx(){ return idx > 0 ? idx - 1 : (mode === 1 ? files.length - 1 : -1); }
+  const goNext = () => { const j = nextIdx(); if(j >= 0) openAt(j); };
+  const goPrev = () => { const j = prevIdx(); if(j >= 0) openAt(j); };
+  function setMode(m){
+    mode = m % MODES.length; v.loop = mode === 2;
+    $('modeBtn').textContent = MODES[mode][0] + ' ' + MODES[mode][1];
+    try{ localStorage.setItem('vv-mode', mode); }catch(e){}
+    mark();
+  }
+  $('modeBtn').onclick = () => setMode(mode + 1);
+  v.addEventListener('ended', goNext);
   v.addEventListener('error', () => { status('無法播放此檔案（瀏覽器可能不支援其編碼，例如部分 MKV／AVI）'); reveal(); });
-  $('prevBtn').onclick = () => openAt(idx - 1);
-  $('nextBtn').onclick = () => openAt(idx + 1);
+  $('prevBtn').onclick = goPrev;
+  $('nextBtn').onclick = goNext;
   const seek = $('seek'); let seeking = false;
   v.addEventListener('timeupdate', () => {
     $('cur').textContent = fmt(v.currentTime);
@@ -234,20 +260,28 @@ body.hid main{cursor:none}
   $('muteBtn').onclick = () => { v.muted = !v.muted; };
   const setRate = r => { rate = r; v.defaultPlaybackRate = r; v.playbackRate = r; $('rate').value = String(r); };
   $('rate').addEventListener('change', e => setRate(+e.target.value));
+  function closeList(){ L.classList.remove('open'); }
   $('listBtn').onclick = () => L.classList.toggle('open');
+  L.addEventListener('mouseenter', () => clearTimeout(lt));
+  L.addEventListener('mouseleave', () => { lt = setTimeout(closeList, 400); });
 
   // 全螢幕
   function toggleFS(){
     const de = document.documentElement;
-    if(!document.fullscreenElement) (de.requestFullscreen || de.webkitRequestFullscreen || (() => {})).call(de);
-    else (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+    if(document.fullscreenElement || document.webkitFullscreenElement){
+      const x = document.exitFullscreen || document.webkitExitFullscreen; if(x) x.call(document);
+    } else {
+      const r = de.requestFullscreen || de.webkitRequestFullscreen;
+      if(!r){ status('此瀏覽器不支援網頁全螢幕（iPhone 請改用電腦或 iPad）'); return; }
+      const p = r.call(de); if(p && p.catch) p.catch(() => status('無法進入全螢幕，請再按一次'));
+    }
   }
   $('fsBtn').onclick = toggleFS;
-  document.addEventListener('fullscreenchange', () => setTimeout(fit, 100));
+  ['fullscreenchange','webkitfullscreenchange'].forEach(t => document.addEventListener(t, () => setTimeout(fit, 100)));
 
   // 播放時無動作 3 秒後自動隱藏工具列；暫停或尚未載入時常駐
   let ht;
-  function sched(){ clearTimeout(ht); if(idx < 0 || v.paused) return; ht = setTimeout(() => document.body.classList.add('hid'), 3000); }
+  function sched(){ clearTimeout(ht); if(idx < 0 || v.paused) return; ht = setTimeout(() => { document.body.classList.add('hid'); closeList(); }, 3000); }
   function reveal(){ document.body.classList.remove('hid'); sched(); }
   ['mousemove','touchstart','keydown','click'].forEach(t => document.addEventListener(t, reveal, {passive:true}));
 
@@ -258,17 +292,19 @@ body.hid main{cursor:none}
   document.addEventListener('keydown', e => {
     if(e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.key;
+    if(k === 'Escape'){ L.classList.remove('open'); return; }
     if(k === ' ' || k === 'k'){ e.preventDefault(); togglePlay(); }
     else if(k === 'ArrowRight'){ e.preventDefault(); skip(e.shiftKey ? 30 : 5); }
     else if(k === 'ArrowLeft'){ e.preventDefault(); skip(e.shiftKey ? -30 : -5); }
     else if(k === 'ArrowUp'){ e.preventDefault(); v.muted = false; v.volume = Math.min(1, v.volume + .05); }
     else if(k === 'ArrowDown'){ e.preventDefault(); v.volume = Math.max(0, v.volume - .05); }
-    else if(k === 'n' || k === 'N' || k === 'PageDown') openAt(idx + 1);
-    else if(k === 'p' || k === 'P' || k === 'PageUp') openAt(idx - 1);
+    else if(k === 'n' || k === 'N' || k === 'PageDown') goNext();
+    else if(k === 'p' || k === 'P' || k === 'PageUp') goPrev();
     else if(k === 'r' || k === 'R') rotate(e.shiftKey ? 90 : -90);
-    else if(k === '+' || k === '=') setZoom(scale + .25);
-    else if(k === '-' || k === '_') setZoom(scale - .25);
-    else if(k === '0') setZoom(1);
+    else if(k === '+' || k === '=') setZoom(scale * 1.25);
+    else if(k === '-' || k === '_') setZoom(scale / 1.25);
+    else if(k === '0') resetView();
+    else if(k === 'o' || k === 'O') setMode(mode + 1);
     else if(k === 'm' || k === 'M') v.muted = !v.muted;
     else if(k === 'f' || k === 'F') toggleFS();
     else if(k === 'l' || k === 'L') L.classList.toggle('open');
@@ -280,6 +316,8 @@ body.hid main{cursor:none}
     addFiles(Array.from(e.target.files), replace); e.target.value = '';
   });
   pick('folderIn', true); pick('fileIn', true); pick('moreIn', false);
+  try{ mode = +localStorage.getItem('vv-mode') || 0; }catch(e){}
+  setMode(mode);
 })();
 </script>
 </body>
